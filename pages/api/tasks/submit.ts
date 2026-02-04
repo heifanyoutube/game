@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { pool } from '../../lib/db';
-import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { pool } from '../../../lib/db';
+import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 
 type ApiResp = { success: boolean; error?: string; is_correct?: boolean; awarded_points?: number };
 
@@ -12,7 +12,11 @@ async function getUserIdFromAuthHeader(authHeader?: string) {
   const token = parts[1];
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !data || !data.user) return null;
-  return Number(data.user.id);
+  // Supabase user.id is string (uuid) for Supabase Auth; earlier code expected numeric id stored in users table.
+  // If you store Supabase UUIDs in your users.id column, remove Number(...) conversion. 
+  // Here we attempt to convert if numeric, otherwise return the raw id.
+  const uid = data.user.id;
+  return isNaN(Number(uid)) ? uid : Number(uid);
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ApiResp>) {
@@ -53,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(400).json({ success: false, error: 'task expired' });
     }
 
-    if (task.creator_id && Number(task.creator_id) === Number(userId)) {
+    if (task.creator_id && String(task.creator_id) === String(userId)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ success: false, error: 'creator cannot submit their own task' });
     }
@@ -81,7 +85,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
       if (escrowBalance < reward) {
         // insufficient funds in escrow
-        // We can optionally close the task to avoid further tries
         await client.query("UPDATE tasks SET status='closed' WHERE id = $1", [task_id]);
         await client.query('ROLLBACK');
         return res.status(400).json({ success: false, error: 'insufficient escrow to pay reward; task closed' });
@@ -101,7 +104,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       await client.query('UPDATE users SET points = points + $1 WHERE id = $2', [reward.toString(), userId]);
 
       // optional: if max_acceptances reached, close task
-      // count correct submissions
       const countRes = await client.query('SELECT COUNT(*) AS cnt FROM submissions WHERE task_id = $1 AND is_correct = true', [task_id]);
       const correctCount = Number(countRes.rows[0].cnt);
       if (correctCount >= Number(task.max_acceptances)) {
