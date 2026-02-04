@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { pool } from '../../lib/db';
+import { pool } from '../../../lib/db';
 
 type ApiResp = { success: boolean; error?: string; taskId?: number };
 
